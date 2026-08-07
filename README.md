@@ -1,22 +1,37 @@
-# v2node
-A v2board backend base on moddified xray-core.
-一个基于修改版xray内核的V2board节点服务端。
+# 自有 v2node 镜像仓库
 
-**注意： 本项目需要搭配[修改版V2board](https://github.com/wyx2685/v2board)**
+这是 `pichigogo666` 账号下的独立 v2node 源码与部署仓库，不是 Fork。即使原作者仓库以后不可用，本仓库仍保留完整源码和提交历史。
 
-## 软件安装
+## 自有资源
 
-### 一键安装
+- 源码：本仓库 `main` 分支
+- Docker 镜像：`ghcr.io/pichigogo666/v2node:latest`
+- GeoIP/GeoSite：本仓库 `rules-latest` Release
+- Docker 一键脚本：`deploy/v2node-docker.sh`
+- 配套 V2Board：`pichigogo666/v2board`
 
+## Docker 一键部署
+
+```bash
+curl -fL \
+  https://raw.githubusercontent.com/pichigogo666/v2node/main/deploy/v2node-docker.sh \
+  -o v2node-docker.sh
+
+chmod +x v2node-docker.sh
+sudo ./v2node-docker.sh install
 ```
-wget -N https://raw.githubusercontent.com/wyx2685/v2node/master/script/install.sh && bash install.sh
-```
 
-## 构建
-``` bash
-GOEXPERIMENT=jsonv2 go build -v -o build_assets/v2node -trimpath -ldflags "-X 'github.com/wyx2685/v2node/cmd.version=$version' -s -w -buildid="
-```
+脚本会询问 V2Board 节点 API 地址、v2node 节点 ID 和通信密钥，并自动部署 Docker Compose 服务。
 
-## Stars 增长记录
+## 更新镜像
 
-[![Stargazers over time](https://starchart.cc/wyx2685/v2node.svg?variant=adaptive)](https://starchart.cc/wyx2685/v2node)
+仓库源码或 Dockerfile 更新后，GitHub Actions 会构建 `amd64` 与 `arm64` 镜像并发布到本账号的 GHCR。
+
+## 规则文件
+
+运行 `Vendor GeoIP and GeoSite files` 工作流，可以将规则文件保存到本仓库自己的 `rules-latest` Release。节点安装时只从本仓库下载，不再直接依赖规则项目。
+
+## 上游声明
+
+本仓库基于 v2node 开源代码保留副本，原许可证见仓库中的 `LICENSE`。
+
