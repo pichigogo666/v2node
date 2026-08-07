@@ -1,10 +1,15 @@
-# Build go
-FROM golang:1.26.1-alpine AS builder
+# syntax=docker/dockerfile:1
+
+# Build Go natively on the runner and cross-compile for the target platform.
+# This avoids compiling the full Xray dependency tree through QEMU for arm64.
+FROM --platform=$BUILDPLATFORM golang:1.26.1-alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /app
 COPY . .
 ENV CGO_ENABLED=0
 RUN GOEXPERIMENT=jsonv2 go mod download
-RUN GOEXPERIMENT=jsonv2 go build -v -o v2node
+RUN GOEXPERIMENT=jsonv2 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -v -o v2node
 
 # Release
 FROM  alpine
