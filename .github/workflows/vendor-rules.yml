@@ -1,0 +1,44 @@
+name: Vendor GeoIP and GeoSite files
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download rule files
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 \
+            https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/geoip.dat \
+            -o geoip.dat
+          curl -fL --retry 3 \
+            https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/geosite.dat \
+            -o geosite.dat
+          test -s geoip.dat
+          test -s geosite.dat
+          sha256sum geoip.dat geosite.dat > SHA256SUMS
+
+      - name: Publish files to this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view rules-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload rules-latest \
+              geoip.dat geosite.dat SHA256SUMS \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create rules-latest \
+              geoip.dat geosite.dat SHA256SUMS \
+              --title "Vendored GeoIP and GeoSite files" \
+              --notes "Self-hosted rule files used by the v2node Docker installer." \
+              --latest=false \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+
