@@ -23,6 +23,38 @@ sudo ./v2node-docker.sh install
 
 脚本会询问 V2Board 节点 API 地址、v2node 节点 ID 和通信密钥，并自动部署 Docker Compose 服务。
 
+### 同一服务器部署多个节点
+
+每个节点指定一个不同的实例名称，并确保 V2Board 后台为它们配置了不同的服务端口：
+
+```bash
+sudo ./v2node-docker.sh install --instance jp01 --node-id 1
+sudo ./v2node-docker.sh install --instance jp02 --node-id 2
+```
+
+脚本会分别创建：
+
+```text
+/opt/v2node-docker-jp01   容器 v2node-jp01
+/opt/v2node-docker-jp02   容器 v2node-jp02
+```
+
+管理指定实例：
+
+```bash
+sudo ./v2node-docker.sh status --instance jp01
+sudo ./v2node-docker.sh logs --instance jp02 -f
+sudo ./v2node-docker.sh update --instance jp01
+```
+
+也可以直接运行各实例目录中的脚本，脚本会自动识别所属实例：
+
+```bash
+sudo bash /opt/v2node-docker-jp01/v2node-docker.sh status
+```
+
+不填写 `--instance` 时保持旧版兼容，继续使用 `/opt/v2node-docker` 和容器名 `v2node`。
+
 ## 更新镜像
 
 仓库源码或 Dockerfile 更新后，GitHub Actions 会构建 `amd64` 与 `arm64` 镜像并发布到本账号的 GHCR。
