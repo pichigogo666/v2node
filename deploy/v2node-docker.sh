@@ -6,13 +6,19 @@ APP_NAME='v2node'
 DEFAULT_INSTALL_DIR='/opt/v2node-docker'
 DEFAULT_IMAGE_REPO='ghcr.io/pichigogo666/v2node'
 DEFAULT_IMAGE_TAG='latest'
+DEFAULT_INSTANCE='default'
 
 COMMAND='install'
-INSTALL_DIR="${V2NODE_INSTALL_DIR:-$DEFAULT_INSTALL_DIR}"
+INSTANCE="${V2NODE_INSTANCE:-$DEFAULT_INSTANCE}"
+INSTANCE_EXPLICIT=0
+INSTALL_DIR="${V2NODE_INSTALL_DIR:-}"
+INSTALL_DIR_EXPLICIT=0
 IMAGE_REPO="${V2NODE_IMAGE_REPO:-$DEFAULT_IMAGE_REPO}"
 IMAGE_TAG="${V2NODE_IMAGE_TAG:-$DEFAULT_IMAGE_TAG}"
 IMAGE_REPO_EXPLICIT=0
 IMAGE_TAG_EXPLICIT=0
+CONTAINER_NAME=''
+COMPOSE_PROJECT=''
 API_HOST=''
 NODE_ID=''
 API_KEY=''
@@ -23,6 +29,19 @@ OPEN_FIREWALL=1
 PURGE=0
 ASSUME_YES=0
 FOLLOW_LOGS=0
+
+if [[ -n "${V2NODE_INSTANCE:-}" ]]; then
+    INSTANCE_EXPLICIT=1
+fi
+if [[ -n "${V2NODE_INSTALL_DIR:-}" ]]; then
+    INSTALL_DIR_EXPLICIT=1
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+if [[ -z "$INSTALL_DIR" && -f "$SCRIPT_DIR/deployment.env" ]]; then
+    INSTALL_DIR="$SCRIPT_DIR"
+    INSTALL_DIR_EXPLICIT=1
+fi
 
 log() {
     printf '[%s] %s\n' "$APP_NAME" "$*"
@@ -43,19 +62,20 @@ v2node Docker 一键部署脚本
 
 用法：
   sudo bash v2node-docker.sh install [选项]
-  sudo bash v2node-docker.sh update [--image-repo REPO] [--image-tag TAG]
-  sudo bash v2node-docker.sh status
-  sudo bash v2node-docker.sh logs [-f]
-  sudo bash v2node-docker.sh restart
-  sudo bash v2node-docker.sh uninstall [--purge] [--yes]
+  sudo bash v2node-docker.sh update [--instance NAME] [--image-repo REPO] [--image-tag TAG]
+  sudo bash v2node-docker.sh status [--instance NAME]
+  sudo bash v2node-docker.sh logs [--instance NAME] [-f]
+  sudo bash v2node-docker.sh restart [--instance NAME]
+  sudo bash v2node-docker.sh uninstall [--instance NAME] [--purge] [--yes]
 
 install 选项：
   --api-host URL       V2Board 节点 API 地址，例如 https://panel.example.com
   --node-id ID         V2Board 中 v2node 类型的节点 ID
   --api-key KEY        节点通信密钥；省略时会隐藏输入，避免写进命令历史
+  --instance NAME      实例名称；同机多节点时每个节点必须不同，例如 jp01、jp02
   --image-repo REPO    Docker 镜像仓库，默认 ghcr.io/pichigogo666/v2node
   --image-tag TAG      自有 GHCR 镜像标签，默认 latest
-  --install-dir DIR    安装目录，默认 /opt/v2node-docker
+  --install-dir DIR    自定义安装目录；通常不需要填写
   --replace-native     停止并禁用已有的原生 v2node systemd 服务
   --no-firewall        不自动放行系统防火墙中的节点端口
 
@@ -65,11 +85,21 @@ uninstall 选项：
 
 示例：
   sudo bash v2node-docker.sh install \
+    --instance jp01 \
     --api-host https://panel.example.com \
     --node-id 1
 
+  # 同一服务器部署第二个节点
+  sudo bash v2node-docker.sh install \
+    --instance jp02 \
+    --api-host https://panel.example.com \
+    --node-id 2
+
 说明：
   脚本使用 host 网络，节点真实监听端口由 V2Board 后台配置决定。
+  不指定 --instance 时继续使用旧版单节点目录 /opt/v2node-docker 和容器名 v2node。
+  非默认实例使用独立目录 /opt/v2node-docker-NAME 和容器名 v2node-NAME。
+  同一服务器上的不同节点必须在 V2Board 后台设置不同的服务端口。
   通信密钥不会显示在部署结果或日志摘要中。
 EOF
 }
@@ -97,6 +127,12 @@ parse_args() {
                 API_KEY="$2"
                 shift 2
                 ;;
+            --instance)
+                [[ $# -ge 2 ]] || die '--instance 缺少值'
+                INSTANCE="$2"
+                INSTANCE_EXPLICIT=1
+                shift 2
+                ;;
             --image-tag)
                 [[ $# -ge 2 ]] || die '--image-tag 缺少值'
                 IMAGE_TAG="$2"
@@ -112,6 +148,7 @@ parse_args() {
             --install-dir)
                 [[ $# -ge 2 ]] || die '--install-dir 缺少值'
                 INSTALL_DIR="$2"
+                INSTALL_DIR_EXPLICIT=1
                 shift 2
                 ;;
             --replace-native)
@@ -145,6 +182,26 @@ parse_args() {
     done
 }
 
+configure_instance() {
+    [[ "$INSTANCE" =~ ^[a-z0-9][a-z0-9-]{0,31}$ ]] || die '实例名称只能包含小写字母、数字和短横线，长度不超过 32 个字符'
+
+    if [[ -z "$INSTALL_DIR" ]]; then
+        if [[ "$INSTANCE" == "$DEFAULT_INSTANCE" ]]; then
+            INSTALL_DIR="$DEFAULT_INSTALL_DIR"
+        else
+            INSTALL_DIR="${DEFAULT_INSTALL_DIR}-${INSTANCE}"
+        fi
+    fi
+
+    if [[ "$INSTANCE" == "$DEFAULT_INSTANCE" ]]; then
+        CONTAINER_NAME='v2node'
+        COMPOSE_PROJECT='v2node-docker'
+    else
+        CONTAINER_NAME="v2node-${INSTANCE}"
+        COMPOSE_PROJECT="v2node-${INSTANCE}"
+    fi
+}
+
 require_root() {
     [[ ${EUID:-$(id -u)} -eq 0 ]] || die '请使用 root 或 sudo 运行'
 }
@@ -156,6 +213,16 @@ validate_install_dir() {
             die "拒绝使用危险安装目录：$INSTALL_DIR"
             ;;
     esac
+}
+
+validate_install_state_ownership() {
+    local saved_instance="$DEFAULT_INSTANCE"
+    [[ -f "$INSTALL_DIR/deployment.env" ]] || return 0
+
+    if grep -Eq '^INSTANCE=[a-z0-9][a-z0-9-]{0,31}$' "$INSTALL_DIR/deployment.env"; then
+        saved_instance="$(sed -nE 's/^INSTANCE=([a-z0-9][a-z0-9-]{0,31})$/\1/p' "$INSTALL_DIR/deployment.env" | head -n 1)"
+    fi
+    [[ "$saved_instance" == "$INSTANCE" ]] || die "安装目录属于实例 ${saved_instance}，不能用实例 ${INSTANCE} 覆盖"
 }
 
 validate_architecture() {
@@ -231,7 +298,7 @@ ensure_docker() {
 }
 
 compose() {
-    docker compose --project-directory "$INSTALL_DIR" -f "$INSTALL_DIR/compose.yml" "$@"
+    docker compose --project-name "$COMPOSE_PROJECT" --project-directory "$INSTALL_DIR" -f "$INSTALL_DIR/compose.yml" "$@"
 }
 
 json_escape() {
@@ -334,19 +401,27 @@ handle_native_service() {
 }
 
 docker_container_exists() {
-    docker inspect v2node >/dev/null 2>&1
+    docker inspect "$CONTAINER_NAME" >/dev/null 2>&1
 }
 
 validate_existing_container() {
-    local compose_project
+    local compose_project compose_working_dir
     docker_container_exists || return 0
-    compose_project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' v2node 2>/dev/null || true)"
-    [[ "$compose_project" == 'v2node-docker' ]] || die '已存在名称为 v2node 的其他容器，请先确认并处理，脚本不会覆盖它'
+    compose_project="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+    compose_working_dir="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+    [[ "$compose_project" == "$COMPOSE_PROJECT" ]] || die "已存在名称为 ${CONTAINER_NAME} 的其他容器，脚本不会覆盖它"
+    if [[ -n "$compose_working_dir" && "$compose_working_dir" != "$INSTALL_DIR" ]]; then
+        die "实例 ${INSTANCE} 已由其他目录管理：${compose_working_dir}"
+    fi
 }
 
 check_port_conflict() {
-    if docker_container_exists; then
-        return
+    local previous_port=''
+    if docker_container_exists && [[ -f "$INSTALL_DIR/deployment.env" ]]; then
+        previous_port="$(sed -nE 's/^NODE_PORT=([0-9]+)$/\1/p' "$INSTALL_DIR/deployment.env" | head -n 1)"
+        if [[ "$previous_port" == "$NODE_PORT" ]]; then
+            return
+        fi
     fi
     if command -v ss >/dev/null 2>&1 && ss -H -lntup 2>/dev/null | grep -Eq ":${NODE_PORT}[[:space:]]"; then
         ss -H -lntup 2>/dev/null | grep -E ":${NODE_PORT}[[:space:]]" >&2 || true
@@ -426,12 +501,12 @@ download_rule_data() {
 
 write_compose_file() {
     cat > "$INSTALL_DIR/compose.yml" <<EOF
-name: v2node-docker
+name: ${COMPOSE_PROJECT}
 
 services:
   v2node:
     image: ${IMAGE_REPO}:${IMAGE_TAG}
-    container_name: v2node
+    container_name: ${CONTAINER_NAME}
     network_mode: host
     restart: unless-stopped
     init: true
@@ -456,6 +531,9 @@ EOF
 
     umask 077
     {
+        printf 'INSTANCE=%q\n' "$INSTANCE"
+        printf 'CONTAINER_NAME=%q\n' "$CONTAINER_NAME"
+        printf 'COMPOSE_PROJECT=%q\n' "$COMPOSE_PROJECT"
         printf 'API_HOST=%q\n' "$API_HOST"
         printf 'NODE_ID=%q\n' "$NODE_ID"
         printf 'NODE_PROTOCOL=%q\n' "$NODE_PROTOCOL"
@@ -501,30 +579,30 @@ open_system_firewall() {
 start_stack() {
     log "拉取自有镜像 ${IMAGE_REPO}:${IMAGE_TAG}"
     docker pull "${IMAGE_REPO}:${IMAGE_TAG}"
-    log '启动 v2node 容器'
+    log "启动 ${CONTAINER_NAME} 容器"
     compose up -d --force-recreate --remove-orphans
 
     local attempt running restarts health
     for attempt in {1..12}; do
         sleep 2
-        running="$(docker inspect -f '{{.State.Running}}' v2node 2>/dev/null || true)"
-        restarts="$(docker inspect -f '{{.RestartCount}}' v2node 2>/dev/null || printf '0')"
+        running="$(docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+        restarts="$(docker inspect -f '{{.RestartCount}}' "$CONTAINER_NAME" 2>/dev/null || printf '0')"
         if [[ "$running" == 'true' && "$restarts" == '0' ]]; then
             break
         fi
     done
 
-    running="$(docker inspect -f '{{.State.Running}}' v2node 2>/dev/null || true)"
-    restarts="$(docker inspect -f '{{.RestartCount}}' v2node 2>/dev/null || printf '0')"
-    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}未配置{{end}}' v2node 2>/dev/null || true)"
+    running="$(docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+    restarts="$(docker inspect -f '{{.RestartCount}}' "$CONTAINER_NAME" 2>/dev/null || printf '0')"
+    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}未配置{{end}}' "$CONTAINER_NAME" 2>/dev/null || true)"
 
     if [[ "$running" != 'true' ]]; then
         compose logs --tail 100 v2node >&2 || true
-        die 'v2node 容器未能保持运行，请根据上面的日志排查'
+        die "${CONTAINER_NAME} 容器未能保持运行，请根据上面的日志排查"
     fi
     if [[ "$restarts" != '0' ]]; then
         compose logs --tail 100 v2node >&2 || true
-        die "v2node 容器发生了 ${restarts} 次重启，请检查面板节点和用户配置"
+        die "${CONTAINER_NAME} 容器发生了 ${restarts} 次重启，请检查面板节点和用户配置"
     fi
 
     log "容器运行正常，健康状态：$health"
@@ -534,6 +612,8 @@ show_summary() {
     cat <<EOF
 
 部署完成
+  实例名称：$INSTANCE
+  容器名称：$CONTAINER_NAME
   面板地址：$API_HOST
   节点 ID：$NODE_ID
   协议：$NODE_PROTOCOL
@@ -552,6 +632,7 @@ EOF
 install_flow() {
     validate_architecture
     collect_install_parameters
+    validate_install_state_ownership
     ensure_docker
     fetch_node_info
     handle_native_service
@@ -573,10 +654,17 @@ install_flow() {
 load_deployment_state() {
     local requested_image_repo="$IMAGE_REPO"
     local requested_image_tag="$IMAGE_TAG"
+    local requested_instance="$INSTANCE"
     [[ -f "$INSTALL_DIR/deployment.env" ]] || die "未找到部署状态：$INSTALL_DIR/deployment.env"
     # 该文件由本脚本生成、目录仅 root 可写。
     # shellcheck disable=SC1090
+    INSTANCE="$DEFAULT_INSTANCE"
     source "$INSTALL_DIR/deployment.env"
+    INSTANCE="${INSTANCE:-$DEFAULT_INSTANCE}"
+    if [[ $INSTANCE_EXPLICIT -eq 1 && "$INSTANCE" != "$requested_instance" ]]; then
+        die "安装目录属于实例 ${INSTANCE}，不是请求的实例 ${requested_instance}"
+    fi
+    configure_instance
     if [[ $IMAGE_REPO_EXPLICIT -eq 1 ]]; then
         IMAGE_REPO="$requested_image_repo"
     fi
@@ -599,15 +687,17 @@ update_flow() {
 status_flow() {
     ensure_docker
     [[ -f "$INSTALL_DIR/compose.yml" ]] || die "未找到部署：$INSTALL_DIR/compose.yml"
+    load_deployment_state
     compose ps
     if docker_container_exists; then
-        docker inspect -f '运行={{.State.Running}} 健康={{if .State.Health}}{{.State.Health.Status}}{{else}}未配置{{end}} 重启次数={{.RestartCount}} 启动时间={{.State.StartedAt}}' v2node
+        docker inspect -f '运行={{.State.Running}} 健康={{if .State.Health}}{{.State.Health.Status}}{{else}}未配置{{end}} 重启次数={{.RestartCount}} 启动时间={{.State.StartedAt}}' "$CONTAINER_NAME"
     fi
 }
 
 logs_flow() {
     ensure_docker
     [[ -f "$INSTALL_DIR/compose.yml" ]] || die "未找到部署：$INSTALL_DIR/compose.yml"
+    load_deployment_state
     if [[ $FOLLOW_LOGS -eq 1 ]]; then
         compose logs --tail 200 -f v2node
     else
@@ -618,6 +708,7 @@ logs_flow() {
 restart_flow() {
     ensure_docker
     [[ -f "$INSTALL_DIR/compose.yml" ]] || die "未找到部署：$INSTALL_DIR/compose.yml"
+    load_deployment_state
     compose restart v2node
     status_flow
 }
@@ -625,8 +716,9 @@ restart_flow() {
 uninstall_flow() {
     ensure_docker
     if [[ -f "$INSTALL_DIR/compose.yml" ]]; then
+        load_deployment_state
         compose down --remove-orphans
-        log 'v2node 容器已删除'
+        log "${CONTAINER_NAME} 容器已删除"
     else
         warn "未找到 $INSTALL_DIR/compose.yml"
     fi
@@ -656,6 +748,7 @@ main() {
     fi
 
     require_root
+    configure_instance
     validate_install_dir
 
     case "$COMMAND" in
