@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - master
+      - main
     paths:
       - "**/*.go"
       - "go.mod"
@@ -140,7 +140,7 @@ jobs:
           LIST=('geoip' 'geosite')
           for i in "${LIST[@]}"
           do
-            DOWNLOAD_URL="https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/${i}.dat"
+            DOWNLOAD_URL="https://github.com/pichigogo666/v2node/releases/download/rules-latest/${i}.dat"
             FILE_NAME="${i}.dat"
             echo -e "Downloading ${DOWNLOAD_URL}..."
             curl -L "${DOWNLOAD_URL}" -o ./build_assets/${FILE_NAME}
