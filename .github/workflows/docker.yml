@@ -51,6 +51,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            ziyoufly.splice_idle_timeout=10m
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
