@@ -235,4 +235,4 @@ require (
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
-replace github.com/xtls/xray-core v1.260711.0 => github.com/pichigogo666/xray-core v0.0.0-20260929054912-c1cd73263447
+replace github.com/xtls/xray-core v1.260711.0 => github.com/pichigogo666/xray-core v0.0.0-20260929061039-5c5eff96f05e
