@@ -16,6 +16,7 @@ var limiter map[string]*Limiter
 
 func Init() {
 	limiter = map[string]*Limiter{}
+	initAuthGate()
 }
 
 type Limiter struct {
@@ -165,6 +166,9 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool) (Dynam
 			userLimit = determineSpeedLimit(u.SpeedLimit, u.DynamicSpeedLimit)
 		}
 	} else {
+		return nil, true
+	}
+	if CheckAuthGate(taguuid, ip) {
 		return nil, true
 	}
 	if noUDPsource || l.Nodetype == "hysteria2" || l.Nodetype == "tuic" {

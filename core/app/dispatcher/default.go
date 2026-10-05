@@ -230,6 +230,9 @@ func (d *DefaultDispatcher) getLink(ctx context.Context) (*transport.Link, *tran
 			Counter: downcounter,
 			Writer:  outboundLink.Writer,
 		}
+		sourceIP := sessionInbound.Source.Address.IP().String()
+		inboundLink.Writer = wrapAuthGateTouchWriter(inboundLink.Writer, user.Email, sourceIP)
+		outboundLink.Writer = wrapAuthGateTouchWriter(outboundLink.Writer, user.Email, sourceIP)
 	}
 
 	return inboundLink, outboundLink, limit, nil
@@ -410,6 +413,8 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 			Counter: downcounter,
 			Writer:  outbound.Writer,
 		}
+		sourceIP := sessionInbound.Source.Address.IP().String()
+		outbound.Writer = wrapAuthGateTouchWriter(outbound.Writer, user.Email, sourceIP)
 	}
 
 	sniffingRequest := content.SniffingRequest
