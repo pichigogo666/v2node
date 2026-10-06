@@ -52,6 +52,7 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
             ziyoufly.splice_idle_timeout=10m
+            ziyoufly.auth_gate_bypass=www.gstatic.com:80,443
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

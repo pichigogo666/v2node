@@ -141,7 +141,7 @@ func (l *Limiter) UpdateDynamicSpeedLimit(tag, uuid string, limit int, expire ti
 	return nil
 }
 
-func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool) (DynamicBucket *rate.DynamicBucket, Reject bool) {
+func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool, destinationHost string, destinationPort uint16) (DynamicBucket *rate.DynamicBucket, Reject bool) {
 	// check if ipv4 mapped ipv6
 	ip = strings.TrimPrefix(ip, "::ffff:")
 
@@ -168,7 +168,7 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool) (Dynam
 	} else {
 		return nil, true
 	}
-	if CheckAuthGate(taguuid, ip) {
+	if CheckAuthGate(taguuid, ip, destinationHost, destinationPort) {
 		return nil, true
 	}
 	if noUDPsource || l.Nodetype == "hysteria2" || l.Nodetype == "tuic" {

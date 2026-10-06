@@ -71,9 +71,12 @@ func AuthGateEnabled() bool {
 	return authGateConfigValue.enabled
 }
 
-func CheckAuthGate(taguuid, ip string) bool {
+func CheckAuthGate(taguuid, ip, destinationHost string, destinationPort uint16) bool {
 	cfg := authGateConfigValue
 	if !cfg.enabled {
+		return false
+	}
+	if authGateBypassDestination(destinationHost, destinationPort) {
 		return false
 	}
 
@@ -112,6 +115,15 @@ func CheckAuthGate(taguuid, ip string) bool {
 		log.WithFields(fields).Info("VLESS user authentication gate rejected connection")
 	}
 	return true
+}
+
+// authGateBypassDestination allows well-known connectivity probes to test the
+// node without consuming or changing the per-user authentication-gate state.
+// HTTPS encrypts the request path, so the narrowest reliable match available
+// at this layer is the exact destination hostname and its HTTP(S) ports.
+func authGateBypassDestination(host string, port uint16) bool {
+	host = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+	return host == "www.gstatic.com" && (port == 80 || port == 443)
 }
 
 func TouchAuthGate(taguuid, ip string) {
